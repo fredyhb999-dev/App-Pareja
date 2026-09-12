@@ -1,4 +1,4 @@
 [
-  { "id": "entrenadora", "nombre": "Entrenadora", "admin": true },
-  { "id": "aprendiz", "nombre": "Aprendiz", "admin": false }
+  { "id": "Ama", "nombre": "Ama", "admin": true },
+  { "id": "Esclavo", "nombre": "Esclavo", "admin": false }
 ]
