@@ -1,0 +1,4 @@
+[
+  { "id": "entrenadora", "nombre": "Entrenadora", "admin": true },
+  { "id": "aprendiz", "nombre": "Aprendiz", "admin": false }
+]
