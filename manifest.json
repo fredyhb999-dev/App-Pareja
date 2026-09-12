@@ -1,0 +1,20 @@
+{
+  "name": "Complicidad en Pareja",
+  "short_name": "Complicidad",
+  "start_url": "/App-Pareja/",
+  "display": "standalone",
+  "background_color": "#120e1c",
+  "theme_color": "#120e1c",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
