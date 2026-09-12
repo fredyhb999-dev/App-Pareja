@@ -656,7 +656,7 @@ function escucharCitas(){
 
   const guardado = cargarIdentidadGuardada();
   if(guardado && usuarios.some(u=>u.id === guardado.id)){
-    miIdentidad = guardado;
+    miIdentidad = usuarios.find(u=>u.id === guardado.id);
     mostrarApp();
   }else{
     mostrarPantallaUsuario();
