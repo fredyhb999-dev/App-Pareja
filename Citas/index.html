@@ -148,7 +148,7 @@
   #formCard h2{ font-size:1.3rem; margin-bottom:18px; }
   .campo{ margin-bottom:16px; }
   .campo label{ display:block; font-size:.85rem; color: var(--fg-muted); margin-bottom:6px; }
-  #listaAccesoriosForm{ display:flex; flex-direction:column; gap:10px; }
+  #listaAccesoriosForm{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .checkRow{ display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--card-border); border-radius:10px; padding:10px 12px; }
   .checkRow input{ width:auto; accent-color: var(--teal); }
   #formMsg{ color: var(--rojo); font-size:.85rem; min-height:18px; margin-bottom:10px; }
@@ -249,6 +249,7 @@ const CLAVE_LOCAL = "appPareja_quienSoy";
 let usuarios = [];
 let actividades = [];
 let accesoriosCatalogo = [];
+let accesoriosPorActividadCache = {};
 let miIdentidad = null; // { id, nombre }
 let editandoId = null;  // id del doc si estamos modificando una cita existente
 
@@ -380,13 +381,49 @@ function llenarAccesoriosForm(seleccionados){
     row.appendChild(span);
     listaAccesoriosForm.appendChild(row);
   });
+  ordenarAccesorios();
 }
 
 function obtenerAccesoriosMarcados(){
   return Array.from(listaAccesoriosForm.querySelectorAll("input:checked")).map(i=>i.value);
 }
 
-function abrirFormulario(modo, citaExistente){
+async function obtenerAccesoriosActividad(nombre){
+  if(!nombre) return [];
+  if(accesoriosPorActividadCache[nombre]) return accesoriosPorActividadCache[nombre];
+  try{
+    const r = await fetch(encodeURIComponent(nombre) + ".json");
+    if(!r.ok) return [];
+    const data = await r.json();
+    const arr = Array.isArray(data) ? data : [];
+    accesoriosPorActividadCache[nombre] = arr;
+    return arr;
+  }catch(e){
+    return [];
+  }
+}
+
+async function aplicarAccesoriosDeActividad(nombreActividad, modo){
+  const preset = await obtenerAccesoriosActividad(nombreActividad);
+  Array.from(listaAccesoriosForm.querySelectorAll("input[type=checkbox]")).forEach(input=>{
+    if(modo === "reemplazar"){
+      input.checked = preset.includes(input.value);
+    }else{
+      if(preset.includes(input.value)) input.checked = true;
+    }
+  });
+  ordenarAccesorios();
+}
+
+function ordenarAccesorios(){
+  const nodos = Array.from(listaAccesoriosForm.querySelectorAll(".checkRow"));
+  const marcados = nodos.filter(n=> n.querySelector("input").checked);
+  const sinMarcar = nodos.filter(n=> !n.querySelector("input").checked);
+  marcados.forEach(n=> listaAccesoriosForm.appendChild(n));
+  sinMarcar.forEach(n=> listaAccesoriosForm.appendChild(n));
+}
+
+async function abrirFormulario(modo, citaExistente){
   formMsg.textContent = "";
   llenarSelectActividades();
   prepararCampoPara();
@@ -398,6 +435,7 @@ function abrirFormulario(modo, citaExistente){
     fCampoActividad.value = actividades[0] || "";
     fCampoDescripcion.value = "";
     llenarAccesoriosForm([]);
+    await aplicarAccesoriosDeActividad(fCampoActividad.value, "reemplazar");
   }else{
     editandoId = citaExistente.id;
     formTitulo.textContent = "Modificar cita";
@@ -405,6 +443,7 @@ function abrirFormulario(modo, citaExistente){
     fCampoActividad.value = citaExistente.actividad || (actividades[0] || "");
     fCampoDescripcion.value = citaExistente.descripcion || "";
     llenarAccesoriosForm(citaExistente.accesorios || []);
+    await aplicarAccesoriosDeActividad(fCampoActividad.value, "unir");
     // al modificar, el destinatario ya está definido por la cita original
     campoParaWrap.style.display = "none";
   }
@@ -419,6 +458,14 @@ function cerrarFormulario(){
 
 btnCancelarForm.onclick = cerrarFormulario;
 btnNuevaCita.onclick = ()=> abrirFormulario("nueva", null);
+
+fCampoActividad.addEventListener("change", async ()=>{
+  await aplicarAccesoriosDeActividad(fCampoActividad.value, "reemplazar");
+});
+
+listaAccesoriosForm.addEventListener("change", (e)=>{
+  if(e.target && e.target.type === "checkbox") ordenarAccesorios();
+});
 
 btnGuardarCita.onclick = async ()=>{
   const fecha = fCampoFecha.value;
@@ -439,16 +486,13 @@ btnGuardarCita.onclick = async ()=>{
 
   try{
     if(editandoId){
-      // Modificar cita existente: al guardar, queda confirmada automáticamente
+      // Modificar cita existente: se conserva el estado actual (no confirma)
       await updateDoc(doc(db, "citas", editandoId), {
         fechaCita: fecha,
         actividad,
         descripcion,
         accesorios,
-        estado: "confirmada",
-        actualizadoEn: serverTimestamp(),
-        ultimaAccionPorId: miIdentidad.id,
-        ultimaAccionPorNombre: miIdentidad.nombre
+        actualizadoEn: serverTimestamp()
       });
     }else{
       const paraId = fCampoPara.value;
@@ -580,27 +624,37 @@ function renderCitas(docsSnap){
 
     if(c.estado === "pendiente"){
       if(soyContraparte){
+        const proponenteEsAdmin = !!usuarios.find(u=>u.id === c.proponenteId && u.admin);
         const acciones = document.createElement("div");
         acciones.className = "acciones";
 
-        const btnConf = document.createElement("button");
-        btnConf.className = "btnConfirmar";
-        btnConf.textContent = "Confirmar";
-        btnConf.onclick = ()=> confirmarCita(id);
+        if(proponenteEsAdmin && !esAdmin){
+          const btnEnterado = document.createElement("button");
+          btnEnterado.className = "btnConfirmar";
+          btnEnterado.textContent = "Enterado";
+          btnEnterado.onclick = ()=> confirmarCita(id);
+          acciones.appendChild(btnEnterado);
+        }else{
+          const btnConf = document.createElement("button");
+          btnConf.className = "btnConfirmar";
+          btnConf.textContent = "Confirmar";
+          btnConf.onclick = ()=> confirmarCita(id);
 
-        const btnMod = document.createElement("button");
-        btnMod.className = "btnModificar";
-        btnMod.textContent = "Modificar";
-        btnMod.onclick = ()=> abrirFormulario("modificar", { id, ...c });
+          const btnMod = document.createElement("button");
+          btnMod.className = "btnModificar";
+          btnMod.textContent = "Modificar";
+          btnMod.onclick = ()=> abrirFormulario("modificar", { id, ...c });
 
-        const btnRech = document.createElement("button");
-        btnRech.className = "btnRechazar";
-        btnRech.textContent = "Rechazar";
-        btnRech.onclick = ()=> rechazarCita(id);
+          const btnRech = document.createElement("button");
+          btnRech.className = "btnRechazar";
+          btnRech.textContent = "Rechazar";
+          btnRech.onclick = ()=> rechazarCita(id);
 
-        acciones.appendChild(btnConf);
-        acciones.appendChild(btnMod);
-        acciones.appendChild(btnRech);
+          acciones.appendChild(btnConf);
+          acciones.appendChild(btnMod);
+          acciones.appendChild(btnRech);
+        }
+
         card.appendChild(acciones);
         yaTieneBotonModificar = true;
       }else if(soyProponente){
