@@ -227,7 +227,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
   getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
-  onSnapshot, query, orderBy, serverTimestamp
+  onSnapshot, query, orderBy, serverTimestamp, getDocs, getDoc
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 // ====== CONFIGURACIÓN DE FIREBASE ======
@@ -243,6 +243,8 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const citasRef = collection(db, "citas");
+const extrasRef = collection(db, "accesoriosExtra");
+const actsExtraRef = collection(db, "actividadesExtra");
 
 // ====== ESTADO LOCAL ======
 const CLAVE_LOCAL = "appPareja_quienSoy";
@@ -286,7 +288,38 @@ async function cargarCatalogos(){
   ]);
   usuarios = await rUsuarios.json();
   actividades = await rActividades.json();
+
+  // Mezcla las actividades agregadas en la nube (pantalla ☰)
+  try{
+    const snapActs = await getDocs(actsExtraRef);
+    const vistosActs = new Set(actividades.map(n=>(n || "").trim().toLowerCase()));
+    snapActs.forEach(d=>{
+      const nombre = (d.data().nombre || "").trim();
+      if(nombre && !vistosActs.has(nombre.toLowerCase())){
+        vistosActs.add(nombre.toLowerCase());
+        actividades.push(nombre);
+      }
+    });
+  }catch(e){
+    // Sin conexión a la nube: sigue solo con el JSON
+  }
+
   accesoriosCatalogo = await rAccesorios.json();
+
+  // Mezcla los accesorios agregados en la nube (pantalla ☰)
+  try{
+    const snap = await getDocs(extrasRef);
+    const vistos = new Set(accesoriosCatalogo.map(n=>(n || "").trim().toLowerCase()));
+    snap.forEach(d=>{
+      const nombre = (d.data().nombre || "").trim();
+      if(nombre && !vistos.has(nombre.toLowerCase())){
+        vistos.add(nombre.toLowerCase());
+        accesoriosCatalogo.push(nombre);
+      }
+    });
+  }catch(e){
+    // Sin conexión a la nube: sigue solo con el JSON
+  }
 }
 
 // ====== IDENTIDAD ======
@@ -391,6 +424,16 @@ function obtenerAccesoriosMarcados(){
 async function obtenerAccesoriosActividad(nombre){
   if(!nombre) return [];
   if(accesoriosPorActividadCache[nombre]) return accesoriosPorActividadCache[nombre];
+
+  // Primero la nube (pantalla ☰); si no hay, el archivo <actividad>.json
+  try{
+    const snap = await getDoc(doc(db, "presetsActividad", nombre));
+    if(snap.exists() && Array.isArray(snap.data().accesorios)){
+      accesoriosPorActividadCache[nombre] = snap.data().accesorios;
+      return accesoriosPorActividadCache[nombre];
+    }
+  }catch(e){}
+
   try{
     const r = await fetch(encodeURIComponent(nombre) + ".json");
     if(!r.ok) return [];
