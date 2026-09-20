@@ -156,9 +156,22 @@
   #formBotones button{ flex:1; padding:16px; }
   #btnGuardarCita{ color: var(--bg); background: linear-gradient(90deg, var(--coral), var(--teal)); }
   #btnCancelarForm{ background: var(--card); color: var(--fg); border:1px solid var(--card-border); }
+
+  /* ---------- pancarta de avisos ---------- */
+  #banner{
+    display:none; position:fixed; z-index:100;
+    top:max(14px, env(safe-area-inset-top)); left:16px; right:16px;
+    background:var(--card); border:1px solid var(--teal); border-radius:14px;
+    padding:14px 16px; font-size:.9rem; text-align:center;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+    cursor:pointer;
+  }
+  #banner.ver{ display:block; }
 </style>
 </head>
 <body>
+
+<div id="banner"></div>
 
 <!-- ================= PANTALLA: QUIÉN ERES ================= -->
 <div id="pantallaUsuario">
@@ -254,6 +267,61 @@ let accesoriosCatalogo = [];
 let accesoriosPorActividadCache = {};
 let miIdentidad = null; // { id, nombre }
 let editandoId = null;  // id del doc si estamos modificando una cita existente
+
+// ====== AVISOS (pancarta + sonido + vibración + Telegram) ======
+const TELEGRAM_BOT_TOKEN = "8994983675:AAH0ZGCJrYjlO0XeGuRg61lu1e91gi6FlE0";
+const TELEGRAM_CHAT_ID = "-5323340491";
+
+const bannerEl = document.getElementById("banner");
+let bannerTimer = null;
+let audioCtx = null;
+
+bannerEl.onclick = ()=>bannerEl.classList.remove("ver");
+
+function mostrarBanner(texto){
+  bannerEl.textContent = texto;
+  bannerEl.classList.add("ver");
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(()=>bannerEl.classList.remove("ver"), 6000);
+}
+function bip(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") audioCtx.resume();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.type = "sine"; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+    o.start(); o.stop(audioCtx.currentTime + 0.6);
+  }catch(e){}
+}
+function notificar(texto){
+  mostrarBanner(texto);
+  bip();
+  try{ if(navigator.vibrate) navigator.vibrate([150, 80, 150]); }catch(e){}
+}
+async function avisarTelegram(texto){
+  if(!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN.indexOf("PON_AQUI") === 0) return;
+  if(!TELEGRAM_CHAT_ID || TELEGRAM_CHAT_ID.indexOf("PON_AQUI") === 0) return;
+  try{
+    await fetch("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: texto })
+    });
+  }catch(e){}
+}
+// Acciones propias recientes: no alertar de lo que yo mismo hice
+const suprimidos = {};
+function suprimir(id){
+  suprimidos[id] = Date.now();
+}
+function estaSuprimido(id){
+  return !!(suprimidos[id] && (Date.now() - suprimidos[id] < 10000));
+}
+// Copia local de citas por id (para describir avisos)
+const citasPorId = {};
 
 // ====== ELEMENTOS ======
 const pantallaUsuario = document.getElementById("pantallaUsuario");
@@ -530,13 +598,17 @@ btnGuardarCita.onclick = async ()=>{
   try{
     if(editandoId){
       // Modificar cita existente: se conserva el estado actual (no confirma)
+      suprimir(editandoId);
       await updateDoc(doc(db, "citas", editandoId), {
         fechaCita: fecha,
         actividad,
         descripcion,
         accesorios,
-        actualizadoEn: serverTimestamp()
+        actualizadoEn: serverTimestamp(),
+        ultimaAccionPorId: miIdentidad.id,
+        ultimaAccionPorNombre: miIdentidad.nombre
       });
+      avisarTelegram("✏️ " + miIdentidad.nombre + " modificó la cita: " + actividad + " (" + formatearFecha(fecha) + ")");
     }else{
       const paraId = fCampoPara.value;
       const paraUsuario = usuarios.find(u=>u.id === paraId);
@@ -556,6 +628,7 @@ btnGuardarCita.onclick = async ()=>{
         ultimaAccionPorId: miIdentidad.id,
         ultimaAccionPorNombre: miIdentidad.nombre
       });
+      avisarTelegram("📅 Nueva cita de " + miIdentidad.nombre + " para " + paraUsuario.nombre + ": " + actividad + " (" + formatearFecha(fecha) + ")");
     }
     cerrarFormulario();
   }catch(e){
@@ -568,27 +641,36 @@ btnGuardarCita.onclick = async ()=>{
 
 // ====== ACCIONES SOBRE UNA CITA ======
 async function confirmarCita(id){
+  suprimir(id);
   await updateDoc(doc(db, "citas", id), {
     estado: "confirmada",
     actualizadoEn: serverTimestamp(),
     ultimaAccionPorId: miIdentidad.id,
     ultimaAccionPorNombre: miIdentidad.nombre
   });
+  const c = citasPorId[id];
+  avisarTelegram("✅ " + miIdentidad.nombre + " confirmó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""));
 }
 
 async function rechazarCita(id){
+  suprimir(id);
   await updateDoc(doc(db, "citas", id), {
     estado: "rechazada",
     actualizadoEn: serverTimestamp(),
     ultimaAccionPorId: miIdentidad.id,
     ultimaAccionPorNombre: miIdentidad.nombre
   });
+  const c = citasPorId[id];
+  avisarTelegram("❌ " + miIdentidad.nombre + " rechazó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""));
 }
 
 async function eliminarCita(id){
   const confirmado = confirm("¿Seguro que quieres eliminar esta cita? Esta acción no se puede deshacer.");
   if(!confirmado) return;
+  const c = citasPorId[id];
+  suprimir(id);
   await deleteDoc(doc(db, "citas", id));
+  avisarTelegram("🗑️ " + miIdentidad.nombre + " eliminó la cita: " + (c ? c.actividad : ""));
 }
 
 // ====== RENDER ======
@@ -614,6 +696,7 @@ function renderCitas(docsSnap){
   docsSnap.forEach(docSnap=>{
     const c = docSnap.data();
     const id = docSnap.id;
+    citasPorId[id] = c;
 
     const soyProponente = c.proponenteId === miIdentidad.id;
     const soyContraparte = c.paraId === miIdentidad.id;
@@ -738,9 +821,51 @@ function renderCitas(docsSnap){
   });
 }
 
+let vistosCitas = null;
+function firmaCita(c){
+  return [c.estado, c.actividad, c.fechaCita, c.descripcion,
+    (c.accesorios || []).join("|"), c.ultimaAccionPorId, c.paraId, c.proponenteId].join("~");
+}
+function esRelevanteCita(c){
+  if(!miIdentidad) return false;
+  return c.paraId === miIdentidad.id || c.proponenteId === miIdentidad.id || !!miIdentidad.admin;
+}
+
 function escucharCitas(){
   const q = query(citasRef, orderBy("creadoEn", "desc"));
   onSnapshot(q, (snapshot)=>{
+    if(!vistosCitas){
+      vistosCitas = {};
+      snapshot.docs.forEach(d=>{ vistosCitas[d.id] = firmaCita(d.data()); });
+      renderCitas(snapshot.docs);
+      return;
+    }
+    const ahora = {};
+    snapshot.docs.forEach(d=>{ ahora[d.id] = firmaCita(d.data()); });
+    const yo = miIdentidad && miIdentidad.id;
+    snapshot.docs.forEach(d=>{
+      const id = d.id, c = d.data();
+      if(estaSuprimido(id)) return;
+      const antes = vistosCitas[id];
+      if(antes === undefined){
+        if(esRelevanteCita(c) && c.proponenteId !== yo){
+          notificar("📅 Nueva cita de " + c.proponenteNombre + " para " + c.paraNombre + ": " + c.actividad);
+        }
+      }else if(antes !== ahora[id]){
+        if(esRelevanteCita(c) && c.ultimaAccionPorId !== yo){
+          if(c.estado === "confirmada") notificar("✅ " + (c.ultimaAccionPorNombre || "Alguien") + " confirmó: " + c.actividad);
+          else if(c.estado === "rechazada") notificar("❌ " + (c.ultimaAccionPorNombre || "Alguien") + " rechazó: " + c.actividad);
+          else notificar("✏️ Cita modificada por " + (c.ultimaAccionPorNombre || "alguien") + ": " + c.actividad);
+        }
+      }
+    });
+    Object.keys(vistosCitas).forEach(id=>{
+      if(!(id in ahora) && !estaSuprimido(id)){
+        const c = citasPorId[id];
+        if(c && esRelevanteCita(c)) notificar("🗑️ Se eliminó la cita: " + c.actividad);
+      }
+    });
+    vistosCitas = ahora;
     renderCitas(snapshot.docs);
   }, (error)=>{
     console.error("Error escuchando citas:", error);
