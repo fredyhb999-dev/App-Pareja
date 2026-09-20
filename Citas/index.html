@@ -167,6 +167,7 @@
     cursor:pointer;
   }
   #banner.ver{ display:block; }
+  .destacar{ border-color: var(--teal) !important; box-shadow:0 0 0 2px var(--teal), 0 10px 30px rgba(0,0,0,.5); }
 </style>
 </head>
 <body>
@@ -271,12 +272,21 @@ let editandoId = null;  // id del doc si estamos modificando una cita existente
 // ====== AVISOS (pancarta + sonido + vibración + Telegram) ======
 const TELEGRAM_BOT_TOKEN = "8994983675:AAH0ZGCJrYjlO0XeGuRg61lu1e91gi6FlE0";
 const TELEGRAM_CHAT_ID = "-5323340491";
+const APP_URL = "https://fredyhb999-dev.github.io/App-Pareja/";
 
 const bannerEl = document.getElementById("banner");
 let bannerTimer = null;
 let audioCtx = null;
+let bannerAncla = null;
 
-bannerEl.onclick = ()=>bannerEl.classList.remove("ver");
+bannerEl.onclick = ()=>{
+  bannerEl.classList.remove("ver");
+  if(bannerAncla){
+    const el = document.getElementById(bannerAncla);
+    if(el){ try{ el.scrollIntoView({ behavior:"smooth", block:"center" }); }catch(e){} }
+    bannerAncla = null;
+  }
+};
 
 function mostrarBanner(texto){
   bannerEl.textContent = texto;
@@ -296,19 +306,22 @@ function bip(){
     o.start(); o.stop(audioCtx.currentTime + 0.6);
   }catch(e){}
 }
-function notificar(texto){
+function notificar(texto, ancla){
+  bannerAncla = ancla || null;
   mostrarBanner(texto);
   bip();
   try{ if(navigator.vibrate) navigator.vibrate([150, 80, 150]); }catch(e){}
 }
-async function avisarTelegram(texto){
+async function avisarTelegram(texto, url){
   if(!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN.indexOf("PON_AQUI") === 0) return;
   if(!TELEGRAM_CHAT_ID || TELEGRAM_CHAT_ID.indexOf("PON_AQUI") === 0) return;
   try{
+    const cuerpo = { chat_id: TELEGRAM_CHAT_ID, text: texto };
+    if(url) cuerpo.reply_markup = { inline_keyboard: [[{ text: "Abrir 👀", url: url }]] };
     await fetch("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: texto })
+      body: JSON.stringify(cuerpo)
     });
   }catch(e){}
 }
@@ -322,6 +335,29 @@ function estaSuprimido(id){
 }
 // Copia local de citas por id (para describir avisos)
 const citasPorId = {};
+// Resaltado al abrir con ?cita=ID
+let pendienteResaltar = null;
+let intentosResalte = 0;
+(function(){
+  try{
+    const q = new URLSearchParams(location.search);
+    const id = q.get("cita");
+    if(id) pendienteResaltar = id;
+  }catch(e){}
+  try{ history.replaceState(null, "", location.pathname); }catch(e){}
+})();
+function intentarResaltar(){
+  if(!pendienteResaltar) return;
+  const el = document.getElementById("cita-" + pendienteResaltar);
+  if(el){
+    try{ el.scrollIntoView({ behavior:"smooth", block:"center" }); }catch(e){}
+    el.classList.add("destacar");
+    setTimeout(()=>el.classList.remove("destacar"), 5000);
+    pendienteResaltar = null;
+  }else if(++intentosResalte > 30){
+    pendienteResaltar = null;
+  }
+}
 
 // ====== ELEMENTOS ======
 const pantallaUsuario = document.getElementById("pantallaUsuario");
@@ -422,6 +458,8 @@ function mostrarApp(){
   nombreActualEl.textContent = miIdentidad.nombre;
   pantallaUsuario.style.display = "none";
   appEl.style.display = "flex";
+  intentosResalte = 0;
+  intentarResaltar();
 }
 
 btnCambiarUsuario.onclick = ()=>{
@@ -608,12 +646,12 @@ btnGuardarCita.onclick = async ()=>{
         ultimaAccionPorId: miIdentidad.id,
         ultimaAccionPorNombre: miIdentidad.nombre
       });
-      avisarTelegram("✏️ " + miIdentidad.nombre + " modificó la cita: " + actividad + " (" + formatearFecha(fecha) + ")");
+      avisarTelegram("✏️ " + miIdentidad.nombre + " modificó la cita: " + actividad + " (" + formatearFecha(fecha) + ")", APP_URL + "Citas/?cita=" + editandoId);
     }else{
       const paraId = fCampoPara.value;
       const paraUsuario = usuarios.find(u=>u.id === paraId);
 
-      await addDoc(citasRef, {
+      const refNueva = await addDoc(citasRef, {
         proponenteId: miIdentidad.id,
         proponenteNombre: miIdentidad.nombre,
         paraId: paraUsuario.id,
@@ -628,7 +666,7 @@ btnGuardarCita.onclick = async ()=>{
         ultimaAccionPorId: miIdentidad.id,
         ultimaAccionPorNombre: miIdentidad.nombre
       });
-      avisarTelegram("📅 Nueva cita de " + miIdentidad.nombre + " para " + paraUsuario.nombre + ": " + actividad + " (" + formatearFecha(fecha) + ")");
+      avisarTelegram("📅 Nueva cita de " + miIdentidad.nombre + " para " + paraUsuario.nombre + ": " + actividad + " (" + formatearFecha(fecha) + ")", APP_URL + "Citas/?cita=" + refNueva.id);
     }
     cerrarFormulario();
   }catch(e){
@@ -649,7 +687,7 @@ async function confirmarCita(id){
     ultimaAccionPorNombre: miIdentidad.nombre
   });
   const c = citasPorId[id];
-  avisarTelegram("✅ " + miIdentidad.nombre + " confirmó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""));
+  avisarTelegram("✅ " + miIdentidad.nombre + " confirmó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""), APP_URL + "Citas/?cita=" + id);
 }
 
 async function rechazarCita(id){
@@ -661,7 +699,7 @@ async function rechazarCita(id){
     ultimaAccionPorNombre: miIdentidad.nombre
   });
   const c = citasPorId[id];
-  avisarTelegram("❌ " + miIdentidad.nombre + " rechazó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""));
+  avisarTelegram("❌ " + miIdentidad.nombre + " rechazó la cita: " + (c ? c.actividad : "") + (c ? " (" + formatearFecha(c.fechaCita) + ")" : ""), APP_URL + "Citas/?cita=" + id);
 }
 
 async function eliminarCita(id){
@@ -670,7 +708,7 @@ async function eliminarCita(id){
   const c = citasPorId[id];
   suprimir(id);
   await deleteDoc(doc(db, "citas", id));
-  avisarTelegram("🗑️ " + miIdentidad.nombre + " eliminó la cita: " + (c ? c.actividad : ""));
+  avisarTelegram("🗑️ " + miIdentidad.nombre + " eliminó la cita: " + (c ? c.actividad : ""), APP_URL + "Citas/");
 }
 
 // ====== RENDER ======
@@ -703,6 +741,7 @@ function renderCitas(docsSnap){
 
     const card = document.createElement("div");
     card.className = "cita";
+    card.id = "cita-" + id;
 
     const filaTop = document.createElement("div");
     filaTop.className = "fila-top";
@@ -819,6 +858,7 @@ function renderCitas(docsSnap){
 
     listaCitasEl.appendChild(card);
   });
+  intentarResaltar();
 }
 
 let vistosCitas = null;
@@ -849,13 +889,13 @@ function escucharCitas(){
       const antes = vistosCitas[id];
       if(antes === undefined){
         if(esRelevanteCita(c) && c.proponenteId !== yo){
-          notificar("📅 Nueva cita de " + c.proponenteNombre + " para " + c.paraNombre + ": " + c.actividad);
+          notificar("📅 Nueva cita de " + c.proponenteNombre + " para " + c.paraNombre + ": " + c.actividad, "cita-" + id);
         }
       }else if(antes !== ahora[id]){
         if(esRelevanteCita(c) && c.ultimaAccionPorId !== yo){
-          if(c.estado === "confirmada") notificar("✅ " + (c.ultimaAccionPorNombre || "Alguien") + " confirmó: " + c.actividad);
-          else if(c.estado === "rechazada") notificar("❌ " + (c.ultimaAccionPorNombre || "Alguien") + " rechazó: " + c.actividad);
-          else notificar("✏️ Cita modificada por " + (c.ultimaAccionPorNombre || "alguien") + ": " + c.actividad);
+          if(c.estado === "confirmada") notificar("✅ " + (c.ultimaAccionPorNombre || "Alguien") + " confirmó: " + c.actividad, "cita-" + id);
+          else if(c.estado === "rechazada") notificar("❌ " + (c.ultimaAccionPorNombre || "Alguien") + " rechazó: " + c.actividad, "cita-" + id);
+          else notificar("✏️ Cita modificada por " + (c.ultimaAccionPorNombre || "alguien") + ": " + c.actividad, "cita-" + id);
         }
       }
     });

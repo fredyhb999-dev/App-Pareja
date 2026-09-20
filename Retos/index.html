@@ -105,6 +105,7 @@
     cursor:pointer;
   }
   #banner.ver{ display:block; }
+  .destacar{ border-color: var(--teal) !important; box-shadow:0 0 0 2px var(--teal), 0 10px 30px rgba(0,0,0,.5); }
 
   #contenido{ flex:1; padding:20px; padding-bottom:120px; max-width:560px; width:100%; margin:0 auto; }
 
@@ -380,12 +381,21 @@ let retos = [];
 // ====== AVISOS (pancarta + sonido + vibración + Telegram) ======
 const TELEGRAM_BOT_TOKEN = "8994983675:AAH0ZGCJrYjlO0XeGuRg61lu1e91gi6FlE0";
 const TELEGRAM_CHAT_ID = "-5323340491";
+const APP_URL = "https://fredyhb999-dev.github.io/App-Pareja/";
 
 const bannerEl = document.getElementById("banner");
 let bannerTimer = null;
 let audioCtx = null;
+let bannerAncla = null;
 
-bannerEl.onclick = ()=>bannerEl.classList.remove("ver");
+bannerEl.onclick = ()=>{
+  bannerEl.classList.remove("ver");
+  if(bannerAncla){
+    const el = document.getElementById(bannerAncla);
+    if(el){ try{ el.scrollIntoView({ behavior:"smooth", block:"center" }); }catch(e){} }
+    bannerAncla = null;
+  }
+};
 
 function mostrarBanner(texto){
   bannerEl.textContent = texto;
@@ -405,19 +415,22 @@ function bip(){
     o.start(); o.stop(audioCtx.currentTime + 0.6);
   }catch(e){}
 }
-function notificar(texto){
+function notificar(texto, ancla){
+  bannerAncla = ancla || null;
   mostrarBanner(texto);
   bip();
   try{ if(navigator.vibrate) navigator.vibrate([150, 80, 150]); }catch(e){}
 }
-async function avisarTelegram(texto){
+async function avisarTelegram(texto, url){
   if(!TELEGRAM_BOT_TOKEN || TELEGRAM_BOT_TOKEN.indexOf("PON_AQUI") === 0) return;
   if(!TELEGRAM_CHAT_ID || TELEGRAM_CHAT_ID.indexOf("PON_AQUI") === 0) return;
   try{
+    const cuerpo = { chat_id: TELEGRAM_CHAT_ID, text: texto };
+    if(url) cuerpo.reply_markup = { inline_keyboard: [[{ text: "Abrir 👀", url: url }]] };
     await fetch("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: texto })
+      body: JSON.stringify(cuerpo)
     });
   }catch(e){}
 }
@@ -428,6 +441,29 @@ function suprimir(id){
 }
 function estaSuprimido(id){
   return !!(suprimidos[id] && (Date.now() - suprimidos[id] < 10000));
+}
+// Resaltado al abrir con ?reto=ID
+let pendienteResaltar = null;
+let intentosResalte = 0;
+(function(){
+  try{
+    const q = new URLSearchParams(location.search);
+    const id = q.get("reto");
+    if(id) pendienteResaltar = id;
+  }catch(e){}
+  try{ history.replaceState(null, "", location.pathname); }catch(e){}
+})();
+function intentarResaltar(){
+  if(!pendienteResaltar) return;
+  const el = document.getElementById("reto-" + pendienteResaltar);
+  if(el){
+    try{ el.scrollIntoView({ behavior:"smooth", block:"center" }); }catch(e){}
+    el.classList.add("destacar");
+    setTimeout(()=>el.classList.remove("destacar"), 5000);
+    pendienteResaltar = null;
+  }else if(++intentosResalte > 30){
+    pendienteResaltar = null;
+  }
 }
 let modoForm = null;      // "nueva" | "modificar" | "autorizar"
 let retoEnEdicion = null; // id del reto en el formulario
@@ -526,6 +562,8 @@ function mostrarApp(){
   nombreActualEl.textContent = miIdentidad.nombre;
   pantallaUsuario.style.display = "none";
   appEl.style.display = "flex";
+  intentosResalte = 0;
+  intentarResaltar();
 }
 
 btnCambiarUsuario.onclick = ()=>{
@@ -725,7 +763,7 @@ btnAccion.onclick = async ()=>{
     try{
       if(miIdentidad.admin){
         const ahora = new Date();
-        await addDoc(retosRef, {
+        const refNuevo = await addDoc(retosRef, {
           actividad: f.actividad,
           asignadoPor: { id: miIdentidad.id, nombre: miIdentidad.nombre },
           asignadoA: { id: f.asignadoAId, nombre: usuarios.find(u=>u.id===f.asignadoAId).nombre },
@@ -742,9 +780,9 @@ btnAccion.onclick = async ()=>{
           fechaFin: new Date(ahora.getTime() + f.duracionDias * 86400000),
           autorizadaPor: { id: miIdentidad.id, nombre: miIdentidad.nombre }
         });
-        avisarTelegram("🏆 Nuevo reto en curso de " + miIdentidad.nombre + " para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ": " + f.actividad + " (" + f.puntosMeta + " pts)");
+        avisarTelegram("🏆 Nuevo reto en curso de " + miIdentidad.nombre + " para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ": " + f.actividad + " (" + f.puntosMeta + " pts)", APP_URL + "Retos/?reto=" + refNuevo.id);
       }else{
-        await addDoc(retosRef, {
+        const refNuevo = await addDoc(retosRef, {
           actividad: f.actividad,
           asignadoPor: { id: miIdentidad.id, nombre: miIdentidad.nombre },
           asignadoA: { id: f.asignadoAId, nombre: usuarios.find(u=>u.id===f.asignadoAId).nombre },
@@ -758,7 +796,7 @@ btnAccion.onclick = async ()=>{
           estado: "propuesta",
           creadoEn: serverTimestamp()
         });
-        avisarTelegram("🏆 " + miIdentidad.nombre + " propuso un reto para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ": " + f.actividad + " (" + f.puntosMeta + " pts)");
+        avisarTelegram("🏆 " + miIdentidad.nombre + " propuso un reto para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ": " + f.actividad + " (" + f.puntosMeta + " pts)", APP_URL + "Retos/?reto=" + refNuevo.id);
       }
       cerrarFormulario();
     }catch(e){
@@ -785,7 +823,7 @@ btnAccion.onclick = async ()=>{
         castigo: f.castigo,
         recompensa: soyReceptor ? f.recompensa : (retoActual ? retoActual.recompensa : "")
       });
-      avisarTelegram("✏️ " + miIdentidad.nombre + " modificó el reto: " + f.actividad);
+      avisarTelegram("✏️ " + miIdentidad.nombre + " modificó el reto: " + f.actividad, APP_URL + "Retos/?reto=" + retoEnEdicion);
       cerrarFormulario();
     }catch(e){
       formMsg.textContent = "Error al guardar. Revisa tu conexión.";
@@ -815,7 +853,7 @@ btnAccion.onclick = async ()=>{
         fechaFin: new Date(ahora.getTime() + f.duracionDias * 86400000),
         autorizadaPor: { id: miIdentidad.id, nombre: miIdentidad.nombre }
       });
-      avisarTelegram("✅ " + miIdentidad.nombre + " autorizó el reto: " + f.actividad + " para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ". ¡En curso!");
+      avisarTelegram("✅ " + miIdentidad.nombre + " autorizó el reto: " + f.actividad + " para " + usuarios.find(u=>u.id===f.asignadoAId).nombre + ". ¡En curso!", APP_URL + "Retos/?reto=" + retoEnEdicion);
       cerrarFormulario();
     }catch(e){
       formMsg.textContent = "Error al guardar. Revisa tu conexión.";
@@ -848,7 +886,7 @@ btnGuardarRecompensa.onclick = async ()=>{
   try{
     suprimir(retoRecompensaId);
     await updateDoc(doc(db, "retos", retoRecompensaId), { recompensa: recompensa });
-    avisarTelegram("🎁 " + miIdentidad.nombre + " definió recompensa en " + ((retoActual && retoActual.actividad) || "un reto") + ": " + recompensa);
+    avisarTelegram("🎁 " + miIdentidad.nombre + " definió recompensa en " + ((retoActual && retoActual.actividad) || "un reto") + ": " + recompensa, APP_URL + "Retos/?reto=" + retoRecompensaId);
     overlayRecompensa.style.display = "none";
     retoRecompensaId = null;
   }catch(e){
@@ -872,7 +910,7 @@ async function rechazarReto(id){
     estado: "rechazada",
     ultimaAccionPor: { id: miIdentidad.id, nombre: miIdentidad.nombre }
   });
-  avisarTelegram("❌ " + miIdentidad.nombre + " rechazó el reto: " + (r ? r.actividad : ""));
+  avisarTelegram("❌ " + miIdentidad.nombre + " rechazó el reto: " + (r ? r.actividad : ""), APP_URL + "Retos/?reto=" + id);
 }
 
 async function retirarReto(id){
@@ -880,7 +918,7 @@ async function retirarReto(id){
   const r = buscarReto(id);
   suprimir(id);
   await deleteDoc(doc(db, "retos", id));
-  avisarTelegram("🗑️ " + miIdentidad.nombre + " retiró la propuesta: " + (r ? r.actividad : ""));
+  avisarTelegram("🗑️ " + miIdentidad.nombre + " retiró la propuesta: " + (r ? r.actividad : ""), APP_URL + "Retos/");
 }
 
 async function eliminarReto(reto, id){
@@ -896,7 +934,7 @@ async function eliminarReto(reto, id){
     }else{
       await deleteDoc(doc(db, "retos", id));
     }
-    avisarTelegram("🗑️ " + miIdentidad.nombre + " eliminó el reto: " + (reto.actividad || ""));
+    avisarTelegram("🗑️ " + miIdentidad.nombre + " eliminó el reto: " + (reto.actividad || ""), APP_URL + "Retos/");
   }catch(e){
     console.error(e);
     alert("Error al eliminar el reto. Revisa tu conexión.");
@@ -921,7 +959,7 @@ async function marcarCumplida(reto, id){
     await batch.commit();
     let msg = "⭐ " + miIdentidad.nombre + " dio +1 punto a " + reto.asignadoA.nombre + " en " + reto.actividad + " (" + nuevoConteo + "/" + (reto.puntosMeta || 0) + ")";
     if(metaAlcanzada) msg += "\n🎉 ¡Meta cumplida! Ya puede cobrar" + (reto.recompensa ? ": " + reto.recompensa : ".");
-    avisarTelegram(msg);
+    avisarTelegram(msg, APP_URL + "Retos/?reto=" + id);
   }catch(e){
     console.error(e);
     alert("Error al dar el punto. Revisa tu conexión.");
@@ -935,7 +973,7 @@ async function cobrarRecompensaVisual(reto, id){
   try{
     suprimir(id);
     await updateDoc(doc(db, "retos", id), { recompensaCobrada: true });
-    avisarTelegram("💰 " + reto.asignadoA.nombre + " cobró su recompensa: " + (reto.recompensa || "") + " (" + reto.actividad + ")");
+    avisarTelegram("💰 " + reto.asignadoA.nombre + " cobró su recompensa: " + (reto.recompensa || "") + " (" + reto.actividad + ")", APP_URL + "Retos/?reto=" + id);
   }catch(e){
     console.error(e);
     alert("Error al cobrar la recompensa. Revisa tu conexión.");
@@ -947,7 +985,7 @@ async function aplicarCastigoVisual(reto, id){
   try{
     suprimir(id);
     await updateDoc(doc(db, "retos", id), { castigoAplicado: true });
-    avisarTelegram("⚠️ Castigo para " + reto.asignadoA.nombre + ": " + (reto.castigo || "") + " (" + reto.actividad + ")");
+    avisarTelegram("⚠️ Castigo para " + reto.asignadoA.nombre + ": " + (reto.castigo || "") + " (" + reto.actividad + ")", APP_URL + "Retos/?reto=" + id);
   }catch(e){
     console.error(e);
     alert("Error al aplicar el castigo. Revisa tu conexión.");
@@ -1007,7 +1045,7 @@ function renderRetos(){
     const pct = meta > 0 ? Math.min(100, Math.round(conteo / meta * 100)) : 0;
 
     let html = "";
-    html += '<div class="reto">';
+    html += '<div class="reto" id="reto-' + id + '">';
     html += '<div class="fila-top"><div class="actividad">' + esc(c.actividad) + '</div>';
     html += '<div class="badge ' + esc(estado) + '">' + esc(etiquetaEstado(estado)) + '</div></div>';
     html += '<div class="quien">' + esc(c.asignadoPor.nombre) + ' propuso para ' + esc(c.asignadoA.nombre) + '</div>';
@@ -1126,6 +1164,7 @@ function renderRetos(){
   });
 
   renderBalances();
+  intentarResaltar();
 }
 
 function etiquetaEstado(e){
@@ -1184,21 +1223,21 @@ function escucharRetos(){
       const antes = vistosRetos[id];
       if(antes === undefined){
         if(esRelevanteReto(c) && !(c.asignadoPor && c.asignadoPor.id === yo)){
-          notificar("🏆 Nuevo reto para " + (c.asignadoA && c.asignadoA.nombre) + ": " + c.actividad);
+          notificar("🏆 Nuevo reto para " + (c.asignadoA && c.asignadoA.nombre) + ": " + c.actividad, "reto-" + id);
         }
       }else if(antes.f !== ahora[id].f){
         if(!esRelevanteReto(c)) return;
         const a = ahora[id];
         const asig = c.asignadoA && c.asignadoA.nombre;
-        if(a.e !== antes.e && a.e === "cobrada") notificar("🎉 ¡Meta cumplida en " + c.actividad + "! " + asig + " ya puede cobrar.");
-        else if(a.e !== antes.e && a.e === "noCumplido") notificar("⚠️ No se cumplió " + c.actividad + ". Castigo: " + (c.castigo || ""));
-        else if(a.e !== antes.e && a.e === "rechazada") notificar("❌ Reto rechazado: " + c.actividad);
-        else if(a.e !== antes.e && a.e === "enCurso" && antes.e === "propuesta") notificar("✅ Reto autorizado y en curso: " + c.actividad);
-        else if(a.n > antes.n) notificar("⭐ +1 punto para " + asig + " en " + c.actividad + " (" + a.n + "/" + (c.puntosMeta || 0) + ")");
-        else if(a.rc && !antes.rc) notificar("💰 Recompensa cobrada: " + (c.recompensa || "") + " (" + c.actividad + ")");
-        else if(a.ca && !antes.ca) notificar("⚠️ Castigo aplicado a " + asig + ": " + (c.castigo || ""));
-        else if(a.r && !antes.r) notificar("🎁 Recompensa definida en " + c.actividad + ": " + a.r);
-        else notificar("✏️ Reto modificado: " + c.actividad);
+        if(a.e !== antes.e && a.e === "cobrada") notificar("🎉 ¡Meta cumplida en " + c.actividad + "! " + asig + " ya puede cobrar.", "reto-" + id);
+        else if(a.e !== antes.e && a.e === "noCumplido") notificar("⚠️ No se cumplió " + c.actividad + ". Castigo: " + (c.castigo || ""), "reto-" + id);
+        else if(a.e !== antes.e && a.e === "rechazada") notificar("❌ Reto rechazado: " + c.actividad, "reto-" + id);
+        else if(a.e !== antes.e && a.e === "enCurso" && antes.e === "propuesta") notificar("✅ Reto autorizado y en curso: " + c.actividad, "reto-" + id);
+        else if(a.n > antes.n) notificar("⭐ +1 punto para " + asig + " en " + c.actividad + " (" + a.n + "/" + (c.puntosMeta || 0) + ")", "reto-" + id);
+        else if(a.rc && !antes.rc) notificar("💰 Recompensa cobrada: " + (c.recompensa || "") + " (" + c.actividad + ")", "reto-" + id);
+        else if(a.ca && !antes.ca) notificar("⚠️ Castigo aplicado a " + asig + ": " + (c.castigo || ""), "reto-" + id);
+        else if(a.r && !antes.r) notificar("🎁 Recompensa definida en " + c.actividad + ": " + a.r, "reto-" + id);
+        else notificar("✏️ Reto modificado: " + c.actividad, "reto-" + id);
       }
     });
     Object.keys(vistosRetos).forEach(id=>{
