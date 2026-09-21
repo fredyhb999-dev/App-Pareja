@@ -2,7 +2,7 @@ name: Recordatorio de la mañana
 
 on:
   schedule:
-    - cron: "0 16 * * *"
+    - cron: "37 15 * * *"  # 09:37 centro: minuto no pico + colchon ante la cola de GitHub
   workflow_dispatch:
     inputs:
       enviar:
