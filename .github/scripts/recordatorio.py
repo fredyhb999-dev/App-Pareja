@@ -31,7 +31,12 @@ def http(url, data=None, method="GET"):
     req = urllib.request.Request(
         url + ("&key=" + API_KEY if "?" in url else "?key=" + API_KEY),
         data=json.dumps(data).encode() if data is not None else None,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # La llave API exige referer del sitio (restriccion web). Sin esto
+            # Google responde 403 y el recordatorio no sale.
+            "Referer": "https://fredyhb999-dev.github.io/App-Pareja/",
+        },
         method=method,
     )
     with urllib.request.urlopen(req, timeout=30) as r:
